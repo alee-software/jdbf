@@ -7,9 +7,10 @@ import net.iryndin.jdbf.util.JdbfUtils;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.Charset;
-import java.text.ParseException;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.Collection;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -50,6 +51,7 @@ public class DbfRecord {
      * Data records are preceded by one byte, that is, a space (0x20) if the record is not deleted, an asterisk (0x2A) if the record is deleted.
      * So, if record is preceded by 0x2A - it is considered to be deleted
      * All other cases: record is considered to be not deleted
+     *
      * @return
      */
     public boolean isDeleted() {
@@ -75,7 +77,7 @@ public class DbfRecord {
     public String getString(String fieldName) {
         Charset charset = this.stringCharset;
         if (charset == null) {
-            charset = Charset.defaultCharset();
+            charset = metadata.getCharset();
         }
         return getString(fieldName, charset);
     }
@@ -139,7 +141,7 @@ public class DbfRecord {
         } else {
             byte[] dbfFieldBytes = new byte[f.getLength()];
             System.arraycopy(bytes, f.getOffset(), dbfFieldBytes, 0, f.getLength());
-            offsetInBlocks = BitUtils.makeInt(dbfFieldBytes[0],dbfFieldBytes[1],dbfFieldBytes[2],dbfFieldBytes[3]);
+            offsetInBlocks = BitUtils.makeInt(dbfFieldBytes[0], dbfFieldBytes[1], dbfFieldBytes[2], dbfFieldBytes[3]);
         }
         if (offsetInBlocks == 0) return new byte[0];
         return memoReader.read(offsetInBlocks).getValue();
@@ -156,7 +158,7 @@ public class DbfRecord {
         } else {
             byte[] dbfFieldBytes = new byte[f.getLength()];
             System.arraycopy(bytes, f.getOffset(), dbfFieldBytes, 0, f.getLength());
-            offsetInBlocks = BitUtils.makeInt(dbfFieldBytes[0],dbfFieldBytes[1],dbfFieldBytes[2],dbfFieldBytes[3]);
+            offsetInBlocks = BitUtils.makeInt(dbfFieldBytes[0], dbfFieldBytes[1], dbfFieldBytes[2], dbfFieldBytes[3]);
         }
         if (offsetInBlocks == 0) return "";
         return memoReader.read(offsetInBlocks).getValueAsString(charset);
@@ -165,17 +167,43 @@ public class DbfRecord {
     public String getMemoAsString(String fieldName) throws IOException {
         Charset charset = getStringCharset();
         if (charset == null) {
-            charset = Charset.defaultCharset();
+            charset = metadata.getCharset();
         }
         return getMemoAsString(fieldName, charset);
     }
 
-    public Date getDate(String fieldName) throws ParseException {
+    public LocalDate getDate(String fieldName) {
         String s = getString(fieldName);
         if (s == null) {
             return null;
         }
         return JdbfUtils.parseDate(s);
+    }
+
+    public ZonedDateTime getDateTime(String fieldName) {
+        // Дата и время.
+        // Существует в двух вариантах: текстовом и бинарном.
+        // Текстовый вариант - строка из 14 цифр в формате ГГГГММДДЧЧММСС; пустое значение - 14 пробелов.
+        // Бинарный вариант - два двойных слова little-endian, т.е. всего 8 байт;
+        //     первое двойное слово содержит число дней от начала Юлианского календаря (01.01.4713 до нашей эры),
+        //     второе двойное слово - число миллисекунд от начала суток;
+        //     пустое значение - 8 нулевых байтов
+
+        final DbfField field = getField(fieldName);
+        if (field.getType() == DbfFieldTypeEnum.DateTime) {
+            if (field.getLength() != 8) {
+                String s = getString(fieldName);
+                if (s == null) {
+                    return null;
+                }
+                return JdbfUtils.parseDateTime(s, ZoneId.systemDefault());
+            }
+        }
+
+        final byte[] bytes = getBytes(fieldName);
+        final int dateInDays = BitUtils.makeInt(bytes[0], bytes[1], bytes[2], bytes[3]);
+        final int time = BitUtils.makeInt(bytes[4], bytes[5], bytes[6], bytes[7]);
+        return JdbfUtils.parseJulianDateTime(dateInDays, time, ZoneId.systemDefault());
     }
 
     public BigDecimal getBigDecimal(String fieldName) {
@@ -250,28 +278,35 @@ public class DbfRecord {
             sb.append(f.getName()).append("=");
             switch (f.getType()) {
                 case Character: {
-                    //String s = getString(f.getName(), "Cp866");
                     String s = getString(f.getName());
-                    //System.out.println(f.getName()+"="+s);
                     sb.append(s);
                     break;
                 }
                 case Date: {
-                    Date d = getDate(f.getName());
-                    //System.out.println(f.getName()+"="+d);
+                    LocalDate d = getDate(f.getName());
                     sb.append(d);
                     break;
                 }
                 case Numeric: {
                     BigDecimal bd = getBigDecimal(f.getName());
-                    //System.out.println(f.getName()+"="+(bd != null ? bd.toPlainString() : null));
                     sb.append(bd);
                     break;
                 }
                 case Logical: {
                     Boolean b = getBoolean(f.getName());
-                    //System.out.println(f.getName()+"="+b);
                     sb.append(b);
+                    break;
+                }
+                /* @deprecated */
+                case DateTime:
+                case Timestamp: {
+                    final ZonedDateTime dt = getDateTime(f.getName());
+                    sb.append(dt);
+                    break;
+                }
+                case Memo: {
+                    final String ms = getMemoAsString(f.getName());
+                    sb.append(ms);
                     break;
                 }
             }
@@ -280,8 +315,8 @@ public class DbfRecord {
         return sb.toString();
     }
 
-    public Map<String, Object> toMap() throws ParseException {
-        Map<String, Object> map = new LinkedHashMap<String, Object>(getFields().size() * 2);
+    public Map<String, Object> toMap() throws IOException {
+        Map<String, Object> map = new LinkedHashMap<>(getFields().size() * 2);
 
         for (DbfField f : getFields()) {
             String name = f.getName();
@@ -306,6 +341,16 @@ public class DbfRecord {
 
                 case Integer:
                     map.put(name, getInteger(name));
+                    break;
+
+                /* @deprecated */
+                case DateTime:
+                case Timestamp:
+                    map.put(name, getDateTime(name));
+                    break;
+
+                case Memo:
+                    map.put(name, getMemoAsString(name));
                     break;
             }
         }

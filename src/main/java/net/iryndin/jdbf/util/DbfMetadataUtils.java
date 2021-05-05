@@ -1,15 +1,14 @@
 package net.iryndin.jdbf.util;
 
-import net.iryndin.jdbf.core.DbfField;
-import net.iryndin.jdbf.core.DbfFieldTypeEnum;
-import net.iryndin.jdbf.core.DbfFileTypeEnum;
-import net.iryndin.jdbf.core.DbfMetadata;
+import net.iryndin.jdbf.core.*;
 
-import java.io.InputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
+
+import static net.iryndin.jdbf.util.JdbfUtils.FILE_HEADER_SIZE;
 
 public class DbfMetadataUtils {
 
@@ -19,7 +18,7 @@ public class DbfMetadataUtils {
         DbfMetadata metadata = new DbfMetadata();
 
         metadata.setType(DbfFileTypeEnum.FoxBASEPlus1);
-        metadata.setUpdateDate(new Date());
+        metadata.setUpdateDate(LocalDate.now());
         //metadata.setRecordsQty(recordsQty);
         int fullHeaderLength = calculateFullHeaderLength(fields);
         metadata.setFullHeaderLength(fullHeaderLength);
@@ -35,7 +34,7 @@ public class DbfMetadataUtils {
         DbfMetadata metadata = new DbfMetadata();
 
         metadata.setType(fileType);
-        metadata.setUpdateDate(new Date());
+        metadata.setUpdateDate(LocalDate.now());
         int fullHeaderLength = calculateFullHeaderLength(fields);
         metadata.setFullHeaderLength(fullHeaderLength);
         int oneRecordLength = calculateOneRecordLength(fields);
@@ -74,19 +73,16 @@ public class DbfMetadataUtils {
         metadata.setOneRecordLength(BitUtils.makeInt(headerBytes[10], headerBytes[11]));
         metadata.setUncompletedTxFlag(headerBytes[14]);
         metadata.setEcnryptionFlag(headerBytes[15]);
+        metadata.setCharset(DbfCharset.fromInt(headerBytes[29]));
     }
 
-    @SuppressWarnings("deprecation")
-    public static Date parseHeaderUpdateDate(byte yearByte, byte monthByte, byte dayByte, DbfFileTypeEnum fileType) {
+    public static LocalDate parseHeaderUpdateDate(byte yearByte, byte monthByte, byte dayByte, DbfFileTypeEnum fileType) {
         int year = yearByte + 2000 - 1900;
         switch (fileType) {
             case FoxBASEPlus1:
                 year = yearByte;
         }
-        int month = monthByte - 1;
-        int day = dayByte;
-        return new Date(year,month,day);
-
+        return LocalDate.of(year, monthByte, dayByte);
     }
 
     public static void readFields(DbfMetadata metadata, InputStream inputStream) throws IOException {
@@ -96,8 +92,8 @@ public class DbfMetadataUtils {
         int fieldLength = 0;
         while (true) {
             if (inputStream.read(fieldBytes) != JdbfUtils.FIELD_RECORD_LENGTH)
-            	throw new IOException("The file is corrupted or is not a dbf file");
-            	
+                throw new IOException("The file is corrupted or is not a dbf file");
+
             DbfField field = createDbfField(fieldBytes);
             fields.add(field);
 
@@ -107,7 +103,7 @@ public class DbfMetadataUtils {
             long oldAvailable = inputStream.available();
             int terminator = inputStream.read();
             if (terminator == -1) {
-            	throw new IOException("The file is corrupted or is not a dbf file");
+                throw new IOException("The file is corrupted or is not a dbf file");
             } else if (terminator == JdbfUtils.HEADER_TERMINATOR) {
                 break;
             } else {
@@ -172,18 +168,17 @@ public class DbfMetadataUtils {
         fieldBytes[17] = (byte) (field.getNumberOfDecimalPlaces() & 0xff);
     }
 
-    @SuppressWarnings("deprecation")
     public static byte[] toByteArrayHeader(DbfMetadata metadata) {
-        byte[] headerBytes = new byte[16];
+        byte[] headerBytes = new byte[FILE_HEADER_SIZE];
         BitUtils.memset(headerBytes, 0);
 
 
         headerBytes[0] = metadata.getType().toByte();
 
-        Date updateDate = metadata.getUpdateDate();
+        LocalDate updateDate = metadata.getUpdateDate();
         // date
         if (updateDate == null) {
-            updateDate = new Date();
+            updateDate = LocalDate.now();
         }
         // write date bytes
         {

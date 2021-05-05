@@ -1,16 +1,17 @@
 package net.iryndin.jdbf.reader;
 
-import net.iryndin.jdbf.core.*;
+import net.iryndin.jdbf.core.DbfMetadata;
+import net.iryndin.jdbf.core.DbfRecord;
 import net.iryndin.jdbf.util.DbfMetadataUtils;
 import net.iryndin.jdbf.util.IOUtils;
 
 import java.io.*;
 import java.util.Arrays;
 
-public class DbfReader implements Closeable {
+import static net.iryndin.jdbf.util.JdbfUtils.FILE_HEADER_SIZE;
 
-    private static final int HEADER_HALF_SIZE = 16;
-	private InputStream dbfInputStream;
+public class DbfReader implements Closeable {
+    private InputStream dbfInputStream;
     private MemoReader memoReader;
     private DbfMetadata metadata;
     private byte[] oneRecordBuffer;
@@ -41,7 +42,7 @@ public class DbfReader implements Closeable {
     }
 
     private void readMetadata() throws IOException {
-        this.dbfInputStream.mark(1024*1024);
+        this.dbfInputStream.mark(1024 * 1024);
         metadata = new DbfMetadata();
         readHeader();
         DbfMetadataUtils.readFields(metadata, dbfInputStream);
@@ -52,17 +53,10 @@ public class DbfReader implements Closeable {
     }
 
     private void readHeader() throws IOException {
-        // 1. Allocate buffer
-        byte[] bytes = new byte[HEADER_HALF_SIZE];
-        // 2. Read 16 bytes
-        if (IOUtils.readFully(dbfInputStream, bytes) != HEADER_HALF_SIZE)
+        byte[] bytes = new byte[FILE_HEADER_SIZE];
+        if (IOUtils.readFully(dbfInputStream, bytes) != FILE_HEADER_SIZE)
             throw new IOException("The file is corrupted or is not a dbf file");
-
-        // 3. Fill header fields
         DbfMetadataUtils.fillHeaderFields(metadata, bytes);
-        // 4. Read next 16 bytes (for most DBF types these are reserved bytes)
-        if (IOUtils.readFully(dbfInputStream, bytes) != HEADER_HALF_SIZE)
-            throw new IOException("The file is corrupted or is not a dbf file");
     }
 
     @Override
@@ -89,7 +83,7 @@ public class DbfReader implements Closeable {
     }
 
     public DbfRecord read() throws IOException {
-        Arrays.fill(oneRecordBuffer, (byte)0x0);
+        Arrays.fill(oneRecordBuffer, (byte) 0x0);
         int readLength = IOUtils.readFully(dbfInputStream, oneRecordBuffer);
 
         if (readLength < metadata.getOneRecordLength()) {

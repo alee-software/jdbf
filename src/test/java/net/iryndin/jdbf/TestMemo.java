@@ -9,7 +9,6 @@ import org.junit.Test;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
-import java.text.ParseException;
 
 import static org.junit.Assert.assertEquals;
 
@@ -56,8 +55,6 @@ public class TestMemo {
 
         } catch (IOException e) {
             //e.printStackTrace();
-        } catch (ParseException e) {
-            e.printStackTrace();
         }
     }
 }
